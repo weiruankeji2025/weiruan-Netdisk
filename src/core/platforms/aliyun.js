@@ -16,7 +16,18 @@ export class AliyunDownloader extends BaseDownloader {
    */
   async parseFileInfo() {
     try {
-      // 从页面全局变量获取
+      // 从分享页面获取
+      const shareId = this.getShareId();
+      if (shareId) {
+        console.log('检测到阿里云盘分享页面，Share ID:', shareId);
+
+        // 确保有 shareToken
+        await this.ensureShareToken(shareId);
+
+        return this.getShareFileList(shareId);
+      }
+
+      // 从页面全局变量获取（个人网盘）
       if (window.__store__) {
         const state = window.__store__.getState();
         const files = state?.fileList?.items || [];
@@ -30,17 +41,30 @@ export class AliyunDownloader extends BaseDownloader {
           shareId: file.share_id
         }));
       }
-
-      // 从分享页面获取
-      const shareId = this.getShareId();
-      if (shareId) {
-        return this.getShareFileList(shareId);
-      }
     } catch (error) {
       console.error('Parse file info failed:', error);
     }
 
     return [];
+  }
+
+  /**
+   * 确保有 shareToken
+   */
+  async ensureShareToken(shareId) {
+    // 检查是否已有 shareToken
+    let shareToken = localStorage.getItem('shareToken');
+
+    if (!shareToken) {
+      console.log('未找到 shareToken，正在获取...');
+      shareToken = await this.getShareToken(shareId);
+
+      if (!shareToken) {
+        throw new Error('无法获取分享Token，请确保分享链接有效');
+      }
+    }
+
+    return shareToken;
   }
 
   /**
@@ -57,6 +81,11 @@ export class AliyunDownloader extends BaseDownloader {
   async getShareFileList(shareId) {
     try {
       const shareToken = localStorage.getItem('shareToken');
+      console.log('正在获取分享文件列表...', { shareId, hasToken: !!shareToken });
+
+      if (!shareToken) {
+        throw new Error('缺少 shareToken，无法获取文件列表');
+      }
 
       const response = await this.crossOriginRequest(
         `${this.apiBase}/adrive/v3/file/list`,
@@ -64,9 +93,10 @@ export class AliyunDownloader extends BaseDownloader {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Share-Token': shareToken || '',
+            'X-Share-Token': shareToken,
             'Referer': 'https://www.aliyundrive.com/',
-            'Origin': 'https://www.aliyundrive.com'
+            'Origin': 'https://www.aliyundrive.com',
+            'User-Agent': navigator.userAgent
           },
           body: JSON.stringify({
             share_id: shareId,
@@ -79,7 +109,10 @@ export class AliyunDownloader extends BaseDownloader {
       );
 
       const data = await response.json();
-      if (data.items) {
+      console.log('文件列表 API 响应:', data);
+
+      if (data.items && data.items.length > 0) {
+        console.log(`✅ 获取到 ${data.items.length} 个文件/文件夹`);
         return data.items.map(file => ({
           fileId: file.file_id,
           fileName: file.name,
@@ -88,8 +121,13 @@ export class AliyunDownloader extends BaseDownloader {
           shareId: shareId
         }));
       }
+
+      if (data.code) {
+        console.error('API 返回错误:', data.code, data.message);
+      }
     } catch (error) {
       console.error('Get share file list failed:', error);
+      throw error;
     }
 
     return [];
@@ -228,12 +266,17 @@ export class AliyunDownloader extends BaseDownloader {
    */
   async getShareToken(shareId, sharePwd = '') {
     try {
+      console.log('正在获取 shareToken...', { shareId, hasPwd: !!sharePwd });
+
       const response = await this.crossOriginRequest(
         `${this.apiBase}/v2/share_link/get_share_token`,
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Referer': 'https://www.aliyundrive.com/',
+            'Origin': 'https://www.aliyundrive.com',
+            'User-Agent': navigator.userAgent
           },
           body: JSON.stringify({
             share_id: shareId,
@@ -243,12 +286,25 @@ export class AliyunDownloader extends BaseDownloader {
       );
 
       const data = await response.json();
+      console.log('获取 shareToken 响应:', data);
+
       if (data.share_token) {
         localStorage.setItem('shareToken', data.share_token);
+        console.log('✅ shareToken 已保存');
         return data.share_token;
+      }
+
+      // 检查是否需要密码
+      if (data.code === 'ShareLinkTokenInvalid') {
+        throw new Error('分享链接无效或已过期');
+      }
+
+      if (data.code === 'InvalidParameter.SharePwd') {
+        throw new Error('需要提取码，请在页面上输入提取码后重试');
       }
     } catch (error) {
       console.error('Get share token failed:', error);
+      throw error;
     }
 
     return null;
