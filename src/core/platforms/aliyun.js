@@ -56,7 +56,7 @@ export class AliyunDownloader extends BaseDownloader {
    */
   async getShareFileList(shareId) {
     try {
-      const token = getCookie('token') || localStorage.getItem('token');
+      const shareToken = localStorage.getItem('shareToken');
 
       const response = await this.crossOriginRequest(
         `${this.apiBase}/adrive/v3/file/list`,
@@ -64,7 +64,9 @@ export class AliyunDownloader extends BaseDownloader {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'X-Share-Token': shareToken || '',
+            'Referer': 'https://www.aliyundrive.com/',
+            'Origin': 'https://www.aliyundrive.com'
           },
           body: JSON.stringify({
             share_id: shareId,
@@ -115,26 +117,34 @@ export class AliyunDownloader extends BaseDownloader {
    */
   async getDownloadUrl(fileInfo) {
     try {
-      const token = getCookie('token') || localStorage.getItem('token');
+      const token = this.getToken();
       const shareToken = localStorage.getItem('shareToken');
+
+      if (!token) {
+        console.warn('No token found');
+        return null;
+      }
 
       // 如果是分享文件
       if (fileInfo.shareId) {
         return this.getShareDownloadUrl(fileInfo, shareToken);
       }
 
-      // 个人文件
+      // 个人文件 - 使用 v2 API (更稳定)
       const response = await this.crossOriginRequest(
         `${this.apiBase}/v2/file/get_download_url`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Referer': 'https://www.aliyundrive.com/',
+            'Origin': 'https://www.aliyundrive.com'
           },
           body: JSON.stringify({
             drive_id: fileInfo.driveId,
-            file_id: fileInfo.fileId
+            file_id: fileInfo.fileId,
+            expire_sec: 14400 // 4小时有效期
           })
         }
       );
@@ -145,6 +155,38 @@ export class AliyunDownloader extends BaseDownloader {
       }
     } catch (error) {
       console.error('Get download url failed:', error);
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取认证 token
+   */
+  getToken() {
+    // 方法1: 从 cookie 获取
+    const cookieToken = getCookie('token');
+    if (cookieToken) {
+      return cookieToken;
+    }
+
+    // 方法2: 从 localStorage 获取
+    const localToken = localStorage.getItem('token');
+    if (localToken) {
+      return localToken;
+    }
+
+    // 方法3: 尝试从全局变量获取
+    if (window.__store__) {
+      try {
+        const state = window.__store__.getState();
+        const token = state?.user?.token?.access_token;
+        if (token) {
+          return token;
+        }
+      } catch (e) {
+        console.warn('Failed to get token from store:', e);
+      }
     }
 
     return null;

@@ -124,7 +124,13 @@ export class BaiduDownloader extends BaseDownloader {
    * 使用官方API获取下载链接
    */
   async getOfficialDownloadLink(fileInfo) {
-    const bdstoken = getCookie('BAIDUID');
+    // 正确获取 bdstoken
+    const bdstoken = this.getBdstoken();
+    if (!bdstoken) {
+      console.warn('No bdstoken found, trying alternative method');
+      return null;
+    }
+
     const logid = this.generateLogid();
 
     const params = new URLSearchParams({
@@ -139,7 +145,8 @@ export class BaiduDownloader extends BaseDownloader {
         method: 'GET',
         headers: {
           'User-Agent': navigator.userAgent,
-          'Cookie': document.cookie
+          'Cookie': document.cookie,
+          'Referer': window.location.href
         }
       }
     );
@@ -147,6 +154,39 @@ export class BaiduDownloader extends BaseDownloader {
     const data = await response.json();
     if (data.errno === 0 && data.dlink) {
       return data.dlink;
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取 BDSTOKEN
+   */
+  getBdstoken() {
+    // 方法1: 从全局变量获取
+    if (window.yunData && window.yunData.MYBDSTOKEN) {
+      return window.yunData.MYBDSTOKEN;
+    }
+
+    // 方法2: 从 locals 变量获取
+    if (window.locals && window.locals.bdstoken) {
+      return window.locals.bdstoken;
+    }
+
+    // 方法3: 从页面脚本中提取
+    const scripts = document.querySelectorAll('script');
+    for (const script of scripts) {
+      const content = script.textContent || '';
+      const match = content.match(/bdstoken["']?\s*[:=]\s*["']([^"']+)["']/i);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    // 方法4: 从 cookie 获取 STOKEN
+    const stoken = getCookie('STOKEN');
+    if (stoken) {
+      return stoken;
     }
 
     return null;

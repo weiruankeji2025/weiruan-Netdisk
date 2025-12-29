@@ -9,6 +9,15 @@ export class TianyiDownloader extends BaseDownloader {
   constructor(platform) {
     super(platform);
     this.apiBase = 'https://cloud.189.cn';
+
+    // 天翼云盘专用请求头
+    this.tianyiHeaders = {
+      'User-Agent': navigator.userAgent,
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+      'Referer': 'https://cloud.189.cn/',
+      'Origin': 'https://cloud.189.cn'
+    };
   }
 
   /**
@@ -48,8 +57,8 @@ export class TianyiDownloader extends BaseDownloader {
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json'
+            ...this.tianyiHeaders,
+            'Content-Type': 'application/x-www-form-urlencoded'
           },
           body: `shareCode=${shareCode}`
         }
@@ -132,8 +141,8 @@ export class TianyiDownloader extends BaseDownloader {
         {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json'
+            ...this.tianyiHeaders,
+            'Content-Type': 'application/x-www-form-urlencoded'
           },
           body: `shareCode=${shareCode}&fileId=${fileInfo.fileId}`
         }
@@ -162,9 +171,10 @@ export class TianyiDownloader extends BaseDownloader {
         {
           method: 'POST',
           headers: {
+            ...this.tianyiHeaders,
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'SessionKey': sessionKey
+            'SessionKey': sessionKey,
+            'Cookie': document.cookie
           },
           body: `fileId=${fileInfo.fileId}`
         }
