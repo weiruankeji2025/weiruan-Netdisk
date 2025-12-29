@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.0.0
-// @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云等主流网盘的直链下载,操作简单,一键获取
+// @version      1.1.0
+// @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
 // @match        *://yun.baidu.com/*
@@ -17,20 +17,29 @@
 // @match        *://share.weiyun.com/*
 // @match        *://pan.xunlei.com/*
 // @match        *://pan.quark.cn/*
+// @match        *://drive-pc.quark.cn/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // @connect      pan.baidu.com
 // @connect      pcs.baidu.com
 // @connect      cloud.189.cn
 // @connect      aliyundrive.com
 // @connect      alipan.com
 // @connect      weiyun.com
+// @connect      pan.quark.cn
+// @connect      drive-pc.quark.cn
 // @connect      *
 // @run-at       document-end
 // @license      MIT
+// @compatible   chrome 所有基于Chromium的浏览器
+// @compatible   firefox Firefox浏览器
+// @compatible   edge Microsoft Edge浏览器
+// @compatible   safari Safari浏览器
+// @compatible   opera Opera浏览器
 // ==/UserScript==
 
 (function() {
@@ -82,6 +91,15 @@
                 /^https?:\/\/share\.weiyun\.com/
             ],
             color: '#00A4FF'
+        },
+        QUARK: {
+            name: '夸克网盘',
+            domain: 'pan.quark.cn',
+            patterns: [
+                /^https?:\/\/pan\.quark\.cn/,
+                /^https?:\/\/drive-pc\.quark\.cn/
+            ],
+            color: '#7C5CFF'
         }
     };
 
@@ -510,6 +528,69 @@
         }
     }
 
+    // ============ 夸克网盘下载器 ============
+    class QuarkDownloader extends BaseDownloader {
+        constructor(platform) {
+            super(platform);
+            this.apiBase = 'https://drive-pc.quark.cn';
+        }
+
+        async parseFileInfo() {
+            try {
+                if (unsafeWindow.__INITIAL_STATE__) {
+                    const state = unsafeWindow.__INITIAL_STATE__;
+                    const files = state?.list?.list || [];
+                    const shareId = this.getShareId();
+
+                    return files.map(file => ({
+                        fid: file.fid,
+                        fileName: file.file_name,
+                        fileSize: file.size,
+                        shareId: shareId
+                    }));
+                }
+            } catch (error) {
+                console.error('Parse file info failed:', error);
+            }
+            return [];
+        }
+
+        getShareId() {
+            const match = window.location.pathname.match(/\/s\/([a-zA-Z0-9]+)/);
+            return match ? match[1] : null;
+        }
+
+        async getDirectLink(fileInfo) {
+            try {
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/1/clouddrive/share/sharepage/download`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            fids: [fileInfo.fid],
+                            share_id: fileInfo.shareId
+                        })
+                    }
+                );
+
+                const data = await response.json();
+                if (data.status === 200 && data.data && data.data.length > 0) {
+                    const fileData = data.data[0];
+                    if (fileData.download_url) {
+                        return fileData.download_url;
+                    }
+                }
+            } catch (error) {
+                console.error('Get direct link failed:', error);
+            }
+
+            throw new Error('无法获取下载链接');
+        }
+    }
+
     // ============ 工厂类 ============
     class DownloaderFactory {
         static downloaders = {
@@ -517,7 +598,8 @@
             TIANYI: TianyiDownloader,
             LANZOU: LanzouDownloader,
             ALIYUN: AliyunDownloader,
-            WEIYUN: WeiyunDownloader
+            WEIYUN: WeiyunDownloader,
+            QUARK: QuarkDownloader
         };
 
         static detectPlatform(url = window.location.href) {
@@ -651,6 +733,9 @@
                     break;
                 case 'WEIYUN':
                     targetSelector = '.top-operate, .mod-operate';
+                    break;
+                case 'QUARK':
+                    targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
                     break;
                 default:
                     targetSelector = 'body';

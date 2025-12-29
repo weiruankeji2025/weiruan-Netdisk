@@ -205,6 +205,9 @@ export class DownloadUI {
       case 'WEIYUN':
         targetSelector = '.top-operate, .mod-operate';
         break;
+      case 'QUARK':
+        targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
+        break;
       default:
         targetSelector = 'body';
     }

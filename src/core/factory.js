@@ -8,6 +8,7 @@ import { TianyiDownloader } from './platforms/tianyi.js';
 import { LanzouDownloader } from './platforms/lanzou.js';
 import { AliyunDownloader } from './platforms/aliyun.js';
 import { WeiyunDownloader } from './platforms/weiyun.js';
+import { QuarkDownloader } from './platforms/quark.js';
 
 export class DownloaderFactory {
   static downloaders = {
@@ -15,7 +16,8 @@ export class DownloaderFactory {
     TIANYI: TianyiDownloader,
     LANZOU: LanzouDownloader,
     ALIYUN: AliyunDownloader,
-    WEIYUN: WeiyunDownloader
+    WEIYUN: WeiyunDownloader,
+    QUARK: QuarkDownloader
   };
 
   /**
