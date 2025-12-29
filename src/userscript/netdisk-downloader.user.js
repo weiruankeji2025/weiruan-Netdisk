@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.1.1
+// @version      1.1.2
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -574,12 +574,80 @@
 
         async parseFileInfo() {
             try {
-                if (unsafeWindow.__INITIAL_STATE__) {
-                    const state = unsafeWindow.__INITIAL_STATE__;
-                    const files = state?.list?.list || [];
-                    const shareId = this.getShareId();
+                const shareId = this.getShareId();
+                console.log('夸克网盘 Share ID:', shareId);
 
-                    return files.map(file => ({
+                // 方法1: 从 __INITIAL_STATE__ 获取
+                if (unsafeWindow.__INITIAL_STATE__) {
+                    console.log('找到 __INITIAL_STATE__:', unsafeWindow.__INITIAL_STATE__);
+                    const state = unsafeWindow.__INITIAL_STATE__;
+                    const files = state?.list?.list || state?.share?.list || [];
+
+                    if (files.length > 0) {
+                        console.log(`✅ 从 __INITIAL_STATE__ 获取到 ${files.length} 个文件`);
+                        return files.map(file => ({
+                            fid: file.fid,
+                            fileName: file.file_name || file.fileName,
+                            fileSize: file.size || file.fileSize,
+                            shareId: shareId
+                        }));
+                    }
+                }
+
+                // 方法2: 从 window.g_initialProps 获取
+                if (unsafeWindow.g_initialProps) {
+                    console.log('找到 g_initialProps:', unsafeWindow.g_initialProps);
+                    const props = unsafeWindow.g_initialProps;
+                    const files = props?.resData?.list || props?.data?.list || [];
+
+                    if (files.length > 0) {
+                        console.log(`✅ 从 g_initialProps 获取到 ${files.length} 个文件`);
+                        return files.map(file => ({
+                            fid: file.fid,
+                            fileName: file.file_name || file.fileName,
+                            fileSize: file.size || file.fileSize,
+                            shareId: shareId
+                        }));
+                    }
+                }
+
+                // 方法3: 尝试从 API 获取
+                if (shareId) {
+                    console.log('尝试从 API 获取文件列表...');
+                    return await this.getFileListFromAPI(shareId);
+                }
+
+                console.warn('所有方法都未能获取到文件列表');
+            } catch (error) {
+                console.error('Parse file info failed:', error);
+            }
+            return [];
+        }
+
+        async getFileListFromAPI(shareId) {
+            try {
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
+                    {
+                        method: 'POST',
+                        headers: this.quarkHeaders,
+                        body: JSON.stringify({
+                            pwd_id: shareId,
+                            pdir_fid: '0',
+                            force: 0,
+                            _page: 1,
+                            _size: 100,
+                            _sort: 'file_type:asc,updated_at:desc'
+                        })
+                    }
+                );
+
+                const data = await response.json();
+                console.log('API 响应:', data);
+
+                if (data.status === 200 && data.data?.list) {
+                    console.log(`✅ 从 API 获取到 ${data.data.list.length} 个文件`);
+                    return data.data.list.map(file => ({
                         fid: file.fid,
                         fileName: file.file_name,
                         fileSize: file.size,
@@ -587,7 +655,7 @@
                     }));
                 }
             } catch (error) {
-                console.error('Parse file info failed:', error);
+                console.error('Get file list from API failed:', error);
             }
             return [];
         }
