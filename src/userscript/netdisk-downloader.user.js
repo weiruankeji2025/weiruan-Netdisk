@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.2.0
+// @version      1.2.1
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -689,7 +689,14 @@
                 const shareId = this.getShareId();
                 console.log('夸克网盘 Share ID:', shareId);
 
-                // 方法1: 从 __INITIAL_STATE__ 获取
+                // 方法1: 从 DOM 提取文件信息（最可靠，优先使用）
+                const domFiles = this.parseFilesFromDOM(shareId);
+                if (domFiles.length > 0) {
+                    console.log(`✅ 从 DOM 获取到 ${domFiles.length} 个文件`);
+                    return domFiles;
+                }
+
+                // 方法2: 从 __INITIAL_STATE__ 获取
                 if (unsafeWindow.__INITIAL_STATE__) {
                     console.log('找到 __INITIAL_STATE__:', unsafeWindow.__INITIAL_STATE__);
                     const state = unsafeWindow.__INITIAL_STATE__;
@@ -706,7 +713,7 @@
                     }
                 }
 
-                // 方法2: 从 window.g_initialProps 获取
+                // 方法3: 从 window.g_initialProps 获取
                 if (unsafeWindow.g_initialProps) {
                     console.log('找到 g_initialProps:', unsafeWindow.g_initialProps);
                     const props = unsafeWindow.g_initialProps;
@@ -723,12 +730,6 @@
                     }
                 }
 
-                // 方法3: 尝试从 API 获取
-                if (shareId) {
-                    console.log('尝试从 API 获取文件列表...');
-                    return await this.getFileListFromAPI(shareId);
-                }
-
                 console.warn('所有方法都未能获取到文件列表');
             } catch (error) {
                 console.error('Parse file info failed:', error);
@@ -736,40 +737,69 @@
             return [];
         }
 
-        async getFileListFromAPI(shareId) {
+        parseFilesFromDOM(shareId) {
             try {
-                const response = await crossOriginRequest(
-                    `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
-                    {
-                        method: 'POST',
-                        headers: this.quarkHeaders,
-                        body: JSON.stringify({
-                            pwd_id: shareId,
-                            pdir_fid: '0',
-                            force: 0,
-                            _page: 1,
-                            _size: 100,
-                            _sort: 'file_type:asc,updated_at:desc'
-                        })
-                    }
-                );
+                const files = [];
+                const fileTable = document.querySelector('.ant-table-tbody');
 
-                const data = await response.json();
-                console.log('API 响应:', data);
-
-                if (data.status === 200 && data.data?.list) {
-                    console.log(`✅ 从 API 获取到 ${data.data.list.length} 个文件`);
-                    return data.data.list.map(file => ({
-                        fid: file.fid,
-                        fileName: file.file_name,
-                        fileSize: file.size,
-                        shareId: shareId
-                    }));
+                if (!fileTable) {
+                    console.log('未找到文件列表表格');
+                    return [];
                 }
+
+                const rows = fileTable.querySelectorAll('tr');
+                console.log(`找到 ${rows.length} 个文件行`);
+
+                rows.forEach((row, index) => {
+                    const nameEl = row.querySelector('.filename-text');
+                    const cells = row.querySelectorAll('td');
+
+                    if (nameEl && cells.length >= 3) {
+                        const fileName = nameEl.textContent.trim();
+                        const fileSize = cells[2]?.textContent.trim() || '';
+
+                        // 跳过文件夹（显示"X项"的是文件夹）
+                        if (fileSize.includes('项')) {
+                            console.log(`跳过文件夹: ${fileName}`);
+                            return;
+                        }
+
+                        // 尝试从row的data属性获取fid
+                        let fid = row.getAttribute('data-row-key') ||
+                                 row.getAttribute('data-fid') ||
+                                 `dom_file_${index}`;
+
+                        // 尝试从React Fiber获取真实的fid
+                        const fiberKey = Object.keys(row).find(key => key.startsWith('__react'));
+                        if (fiberKey) {
+                            try {
+                                const fiber = row[fiberKey];
+                                const rowData = fiber?.return?.memoizedProps?.record;
+                                if (rowData && rowData.fid) {
+                                    fid = rowData.fid;
+                                    console.log(`从React Fiber获取到fid: ${fid}`);
+                                }
+                            } catch (e) {
+                                // 忽略错误
+                            }
+                        }
+
+                        files.push({
+                            fid: fid,
+                            fileName: fileName,
+                            fileSize: fileSize,
+                            shareId: shareId
+                        });
+
+                        console.log(`提取文件: ${fileName} (${fileSize})`);
+                    }
+                });
+
+                return files;
             } catch (error) {
-                console.error('Get file list from API failed:', error);
+                console.error('从DOM提取文件失败:', error);
+                return [];
             }
-            return [];
         }
 
         getShareId() {
