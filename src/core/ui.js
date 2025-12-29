@@ -206,7 +206,7 @@ export class DownloadUI {
         targetSelector = '.top-operate, .mod-operate';
         break;
       case 'QUARK':
-        targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
+        targetSelector = '.header-btn-group, [class*="CommonHeader--right"], header';
         break;
       default:
         targetSelector = 'body';
