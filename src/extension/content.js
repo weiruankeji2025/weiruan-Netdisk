@@ -438,16 +438,94 @@
         constructor(platform) {
             super(platform);
             this.apiBase = 'https://drive-pc.quark.cn';
+
+            // 夸克网盘专用请求头 - 模拟官方PC客户端
+            this.quarkHeaders = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-update.11 Safari/537.36 Channel/pckk_other_ch',
+                'Referer': 'https://pan.quark.cn/',
+                'Origin': 'https://pan.quark.cn',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Content-Type': 'application/json'
+            };
         }
 
         async parseFileInfo() {
             try {
-                if (window.__INITIAL_STATE__) {
-                    const state = window.__INITIAL_STATE__;
-                    const files = state?.list?.list || [];
-                    const shareId = this.getShareId();
+                const shareId = this.getShareId();
+                console.log('夸克网盘 Share ID:', shareId);
 
-                    return files.map(file => ({
+                // 方法1: 从 __INITIAL_STATE__ 获取
+                if (window.__INITIAL_STATE__) {
+                    console.log('找到 __INITIAL_STATE__:', window.__INITIAL_STATE__);
+                    const state = window.__INITIAL_STATE__;
+                    const files = state?.list?.list || state?.share?.list || [];
+
+                    if (files.length > 0) {
+                        console.log(`✅ 从 __INITIAL_STATE__ 获取到 ${files.length} 个文件`);
+                        return files.map(file => ({
+                            fid: file.fid,
+                            fileName: file.file_name || file.fileName,
+                            fileSize: file.size || file.fileSize,
+                            shareId: shareId
+                        }));
+                    }
+                }
+
+                // 方法2: 从 window.g_initialProps 获取
+                if (window.g_initialProps) {
+                    console.log('找到 g_initialProps:', window.g_initialProps);
+                    const props = window.g_initialProps;
+                    const files = props?.resData?.list || props?.data?.list || [];
+
+                    if (files.length > 0) {
+                        console.log(`✅ 从 g_initialProps 获取到 ${files.length} 个文件`);
+                        return files.map(file => ({
+                            fid: file.fid,
+                            fileName: file.file_name || file.fileName,
+                            fileSize: file.size || file.fileSize,
+                            shareId: shareId
+                        }));
+                    }
+                }
+
+                // 方法3: 尝试从 API 获取
+                if (shareId) {
+                    console.log('尝试从 API 获取文件列表...');
+                    return await this.getFileListFromAPI(shareId);
+                }
+
+                console.warn('所有方法都未能获取到文件列表');
+            } catch (error) {
+                console.error('Parse file info failed:', error);
+            }
+            return [];
+        }
+
+        async getFileListFromAPI(shareId) {
+            try {
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
+                    {
+                        method: 'POST',
+                        headers: this.quarkHeaders,
+                        body: JSON.stringify({
+                            pwd_id: shareId,
+                            pdir_fid: '0',
+                            force: 0,
+                            _page: 1,
+                            _size: 100,
+                            _sort: 'file_type:asc,updated_at:desc'
+                        })
+                    }
+                );
+
+                const data = await response.json();
+                console.log('API 响应:', data);
+
+                if (data.status === 200 && data.data?.list) {
+                    console.log(`✅ 从 API 获取到 ${data.data.list.length} 个文件`);
+                    return data.data.list.map(file => ({
                         fid: file.fid,
                         fileName: file.file_name,
                         fileSize: file.size,
@@ -455,7 +533,7 @@
                     }));
                 }
             } catch (error) {
-                console.error('Parse file info failed:', error);
+                console.error('Get file list from API failed:', error);
             }
             return [];
         }
@@ -471,9 +549,7 @@
                     `${this.apiBase}/1/clouddrive/share/sharepage/download`,
                     {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: this.quarkHeaders,
                         body: JSON.stringify({
                             fids: [fileInfo.fid],
                             share_id: fileInfo.shareId
@@ -482,6 +558,8 @@
                 );
 
                 const data = await response.json();
+                console.log('下载链接 API 响应:', data);
+
                 if (data.status === 200 && data.data && data.data.length > 0) {
                     const fileData = data.data[0];
                     if (fileData.download_url) {
@@ -643,7 +721,7 @@
                     targetSelector = '.top-operate, .mod-operate';
                     break;
                 case 'QUARK':
-                    targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
+                    targetSelector = '.header-btn-group, [class*="CommonHeader--right"], header';
                     break;
                 default:
                     targetSelector = 'body';
