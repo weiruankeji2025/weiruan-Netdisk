@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "网盘直链下载增强工具",
+  "version": "1.0.0",
+  "description": "支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云等主流网盘的直链下载,操作简单,一键获取",
+  "author": "WeiRuan",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "downloads",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "*://pan.baidu.com/*",
+    "*://yun.baidu.com/*",
+    "*://pcs.baidu.com/*",
+    "*://cloud.189.cn/*",
+    "*://c.189.cn/*",
+    "*://*.lanzou*.com/*",
+    "*://*.lanzoui.com/*",
+    "*://*.lanzoux.com/*",
+    "*://www.aliyundrive.com/*",
+    "*://api.aliyundrive.com/*",
+    "*://www.alipan.com/*",
+    "*://www.weiyun.com/*",
+    "*://share.weiyun.com/*",
+    "*://pan.xunlei.com/*",
+    "*://pan.quark.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://pan.baidu.com/*",
+        "*://yun.baidu.com/*",
+        "*://cloud.189.cn/*",
+        "*://c.189.cn/*",
+        "*://*.lanzou*.com/*",
+        "*://*.lanzoui.com/*",
+        "*://*.lanzoux.com/*",
+        "*://www.aliyundrive.com/*",
+        "*://www.alipan.com/*",
+        "*://www.weiyun.com/*",
+        "*://share.weiyun.com/*",
+        "*://pan.xunlei.com/*",
+        "*://pan.quark.cn/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
