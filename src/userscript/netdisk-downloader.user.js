@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.1.0
+// @version      1.1.1
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -776,9 +776,16 @@
                     targetSelector = 'body';
             }
 
+            let injected = false;
+            const self = this; // 保存 this 引用
+
             const insertBtn = () => {
+                if (injected) return; // 已注入则跳过
+
                 const target = document.querySelector(targetSelector);
                 if (target && !document.querySelector('.netdisk-download-btn')) {
+                    console.log(`✅ 找到目标容器，准备注入按钮:`, targetSelector);
+
                     const btn = document.createElement('button');
                     btn.className = 'netdisk-download-btn';
                     btn.innerHTML = `
@@ -789,12 +796,21 @@
                         </svg>
                         <span>直链下载</span>
                     `;
-                    btn.addEventListener('click', () => this.handleDownload());
+                    btn.addEventListener('click', () => self.handleDownload());
                     target.insertBefore(btn, target.firstChild);
+
+                    injected = true;
+                    console.log('✅ 按钮注入成功！');
+                    if (observer) observer.disconnect();
                 }
             };
 
+            // 多次重试，增加成功率
+            setTimeout(insertBtn, 500);
             setTimeout(insertBtn, 1000);
+            setTimeout(insertBtn, 2000);
+            setTimeout(insertBtn, 3000);
+
             const observer = new MutationObserver(insertBtn);
             observer.observe(document.body, { childList: true, subtree: true });
         }
