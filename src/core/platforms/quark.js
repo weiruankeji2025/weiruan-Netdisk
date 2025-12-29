@@ -9,6 +9,16 @@ export class QuarkDownloader extends BaseDownloader {
   constructor(platform) {
     super(platform);
     this.apiBase = 'https://drive-pc.quark.cn';
+
+    // 夸克网盘需要的特殊headers
+    this.quarkHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-update.11 Safari/537.36 Channel/pckk_other_ch',
+      'Referer': 'https://pan.quark.cn/',
+      'Origin': 'https://pan.quark.cn',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9',
+      'Content-Type': 'application/json'
+    };
   }
 
   /**
@@ -64,10 +74,7 @@ export class QuarkDownloader extends BaseDownloader {
         `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
+          headers: this.quarkHeaders,
           body: JSON.stringify({
             pwd_id: shareId,
             passcode: passcode || '',
@@ -103,14 +110,16 @@ export class QuarkDownloader extends BaseDownloader {
    */
   async getCurrentFileList() {
     try {
+      const headers = {
+        ...this.quarkHeaders,
+        'Cookie': document.cookie
+      };
+
       const response = await this.crossOriginRequest(
         `${this.apiBase}/1/clouddrive/file/sort`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Cookie': document.cookie
-          },
+          headers: headers,
           body: JSON.stringify({
             pdir_fid: '0',
             _page: 1,
@@ -185,10 +194,7 @@ export class QuarkDownloader extends BaseDownloader {
         `${this.apiBase}/1/clouddrive/share/sharepage/download`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
+          headers: this.quarkHeaders,
           body: JSON.stringify({
             fids: [fileInfo.fid],
             share_id: fileInfo.shareId,
@@ -223,14 +229,16 @@ export class QuarkDownloader extends BaseDownloader {
    */
   async getPersonalDownloadUrl(fileInfo) {
     try {
+      const headers = {
+        ...this.quarkHeaders,
+        'Cookie': document.cookie
+      };
+
       const response = await this.crossOriginRequest(
         `${this.apiBase}/1/clouddrive/file/download`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Cookie': document.cookie
-          },
+          headers: headers,
           body: JSON.stringify({
             fids: [fileInfo.fid]
           })
@@ -261,9 +269,7 @@ export class QuarkDownloader extends BaseDownloader {
         `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: this.quarkHeaders,
           body: JSON.stringify({
             pwd_id: shareId,
             passcode: passcode,
@@ -292,14 +298,16 @@ export class QuarkDownloader extends BaseDownloader {
    */
   async getFileDetail(fid) {
     try {
+      const headers = {
+        ...this.quarkHeaders,
+        'Cookie': document.cookie
+      };
+
       const response = await this.crossOriginRequest(
         `${this.apiBase}/1/clouddrive/file/info`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Cookie': document.cookie
-          },
+          headers: headers,
           body: JSON.stringify({
             fids: [fid]
           })
