@@ -278,9 +278,35 @@
             return [];
         }
 
+        getBdstoken() {
+            // 方法1: 从全局变量获取
+            if (window.yunData && window.yunData.MYBDSTOKEN) {
+                return window.yunData.MYBDSTOKEN;
+            }
+            // 方法2: 从 locals 变量获取
+            if (window.locals && window.locals.bdstoken) {
+                return window.locals.bdstoken;
+            }
+            // 方法3: 从页面脚本中提取
+            const scripts = document.querySelectorAll('script');
+            for (const script of scripts) {
+                const content = script.textContent || '';
+                const match = content.match(/bdstoken["']?\s*[:=]\s*["']([^"']+)["']/i);
+                if (match) return match[1];
+            }
+            // 方法4: 从 cookie 获取 STOKEN
+            const stoken = getCookie('STOKEN');
+            if (stoken) return stoken;
+            return null;
+        }
+
         async getDirectLink(fileInfo) {
             try {
-                const bdstoken = getCookie('BAIDUID');
+                const bdstoken = this.getBdstoken();
+                if (!bdstoken) {
+                    console.warn('No bdstoken found, trying alternative method');
+                    return null;
+                }
                 const params = new URLSearchParams({
                     type: 'dlink',
                     fidlist: `[${fileInfo.fs_id}]`,
@@ -293,7 +319,8 @@
                         method: 'GET',
                         headers: {
                             'User-Agent': navigator.userAgent,
-                            'Cookie': document.cookie
+                            'Cookie': document.cookie,
+                            'Referer': window.location.href
                         }
                     }
                 );
@@ -533,6 +560,16 @@
         constructor(platform) {
             super(platform);
             this.apiBase = 'https://drive-pc.quark.cn';
+
+            // 夸克网盘专用请求头 - 模拟官方PC客户端
+            this.quarkHeaders = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-update.11 Safari/537.36 Channel/pckk_other_ch',
+                'Referer': 'https://pan.quark.cn/',
+                'Origin': 'https://pan.quark.cn',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Content-Type': 'application/json'
+            };
         }
 
         async parseFileInfo() {
@@ -566,9 +603,7 @@
                     `${this.apiBase}/1/clouddrive/share/sharepage/download`,
                     {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: this.quarkHeaders,
                         body: JSON.stringify({
                             fids: [fileInfo.fid],
                             share_id: fileInfo.shareId
@@ -735,7 +770,7 @@
                     targetSelector = '.top-operate, .mod-operate';
                     break;
                 case 'QUARK':
-                    targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
+                    targetSelector = '.header-btn-group, [class*="CommonHeader--right"], header';
                     break;
                 default:
                     targetSelector = 'body';
