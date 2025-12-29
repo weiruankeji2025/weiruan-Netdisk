@@ -45,6 +45,14 @@
                 /^https?:\/\/share\.weiyun\.com/
             ],
             color: '#00A4FF'
+        },
+        QUARK: {
+            name: '夸克网盘',
+            patterns: [
+                /^https?:\/\/pan\.quark\.cn/,
+                /^https?:\/\/drive-pc\.quark\.cn/
+            ],
+            color: '#7C5CFF'
         }
     };
 
@@ -425,6 +433,69 @@
         }
     }
 
+    // ============ 夸克网盘下载器 ============
+    class QuarkDownloader extends BaseDownloader {
+        constructor(platform) {
+            super(platform);
+            this.apiBase = 'https://drive-pc.quark.cn';
+        }
+
+        async parseFileInfo() {
+            try {
+                if (window.__INITIAL_STATE__) {
+                    const state = window.__INITIAL_STATE__;
+                    const files = state?.list?.list || [];
+                    const shareId = this.getShareId();
+
+                    return files.map(file => ({
+                        fid: file.fid,
+                        fileName: file.file_name,
+                        fileSize: file.size,
+                        shareId: shareId
+                    }));
+                }
+            } catch (error) {
+                console.error('Parse file info failed:', error);
+            }
+            return [];
+        }
+
+        getShareId() {
+            const match = window.location.pathname.match(/\/s\/([a-zA-Z0-9]+)/);
+            return match ? match[1] : null;
+        }
+
+        async getDirectLink(fileInfo) {
+            try {
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/1/clouddrive/share/sharepage/download`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            fids: [fileInfo.fid],
+                            share_id: fileInfo.shareId
+                        })
+                    }
+                );
+
+                const data = await response.json();
+                if (data.status === 200 && data.data && data.data.length > 0) {
+                    const fileData = data.data[0];
+                    if (fileData.download_url) {
+                        return fileData.download_url;
+                    }
+                }
+            } catch (error) {
+                console.error('Get direct link failed:', error);
+            }
+
+            throw new Error('无法获取下载链接');
+        }
+    }
+
     // ============ 工厂类 ============
     class DownloaderFactory {
         static downloaders = {
@@ -432,7 +503,8 @@
             TIANYI: TianyiDownloader,
             LANZOU: LanzouDownloader,
             ALIYUN: AliyunDownloader,
-            WEIYUN: WeiyunDownloader
+            WEIYUN: WeiyunDownloader,
+            QUARK: QuarkDownloader
         };
 
         static detectPlatform(url = window.location.href) {
@@ -569,6 +641,9 @@
                     break;
                 case 'WEIYUN':
                     targetSelector = '.top-operate, .mod-operate';
+                    break;
+                case 'QUARK':
+                    targetSelector = '.ant-layout-header, .top-header-info, .header-tool';
                     break;
                 default:
                     targetSelector = 'body';
