@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.1.2
+// @version      1.2.0
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -342,6 +342,15 @@
         constructor(platform) {
             super(platform);
             this.apiBase = 'https://cloud.189.cn';
+
+            // 天翼云盘专用请求头
+            this.tianyiHeaders = {
+                'User-Agent': navigator.userAgent,
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Referer': 'https://cloud.189.cn/',
+                'Origin': 'https://cloud.189.cn'
+            };
         }
 
         async parseFileInfo() {
@@ -351,7 +360,10 @@
                     `${this.apiBase}/api/open/share/getShareInfoByCode.action`,
                     {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        headers: {
+                            ...this.tianyiHeaders,
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
                         body: `shareCode=${shareCode}`
                     }
                 );
@@ -374,7 +386,10 @@
                 `${this.apiBase}/api/open/share/getShareDownloadUrl.action`,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    headers: {
+                        ...this.tianyiHeaders,
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
                     body: `shareCode=${fileInfo.shareCode}&fileId=${fileInfo.fileId}`
                 }
             );
@@ -476,20 +491,62 @@
         }
 
         async parseFileInfo() {
-            if (window.__store__) {
-                const state = window.__store__.getState();
-                const files = state?.fileList?.items || [];
-                return files.map(file => ({
-                    fileId: file.file_id,
-                    fileName: file.name,
-                    fileSize: file.size,
-                    driveId: file.drive_id
-                }));
+            // 检查是否为分享页面
+            const isSharePage = window.location.href.includes('/s/');
+
+            if (isSharePage) {
+                // 从分享页面获取文件信息
+                if (window.__store__) {
+                    const state = window.__store__.getState();
+                    const shareInfo = state?.share?.shareInfoModel;
+                    const files = state?.share?.fileList || state?.fileList?.items || [];
+
+                    const shareId = this.getShareId();
+                    const shareToken = shareInfo?.share_token || localStorage.getItem('shareToken');
+
+                    return files.map(file => ({
+                        fileId: file.file_id,
+                        fileName: file.name,
+                        fileSize: file.size,
+                        driveId: file.drive_id,
+                        shareId: shareId,
+                        shareToken: shareToken,
+                        isShare: true
+                    }));
+                }
+            } else {
+                // 个人文件
+                if (window.__store__) {
+                    const state = window.__store__.getState();
+                    const files = state?.fileList?.items || [];
+                    return files.map(file => ({
+                        fileId: file.file_id,
+                        fileName: file.name,
+                        fileSize: file.size,
+                        driveId: file.drive_id,
+                        isShare: false
+                    }));
+                }
             }
             return [];
         }
 
+        getShareId() {
+            const match = window.location.pathname.match(/\/s\/([a-zA-Z0-9]+)/);
+            return match ? match[1] : null;
+        }
+
         async getDirectLink(fileInfo) {
+            if (fileInfo.isShare) {
+                // 分享文件下载
+                return this.getShareDownloadUrl(fileInfo);
+            } else {
+                // 个人文件下载
+                return this.getPersonalDownloadUrl(fileInfo);
+            }
+        }
+
+        async getPersonalDownloadUrl(fileInfo) {
             const token = getCookie('token') || localStorage.getItem('token');
             const response = await crossOriginRequest(
                 `${this.apiBase}/v2/file/get_download_url`,
@@ -512,6 +569,61 @@
             }
 
             throw new Error('无法获取下载链接');
+        }
+
+        async getShareDownloadUrl(fileInfo) {
+            // 分享文件需要先获取 share_token
+            let shareToken = fileInfo.shareToken;
+
+            if (!shareToken) {
+                shareToken = await this.getShareToken(fileInfo.shareId);
+            }
+
+            const response = await crossOriginRequest(
+                `${this.apiBase}/v2/file/get_share_link_download_url`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Share-Token': shareToken
+                    },
+                    body: JSON.stringify({
+                        share_id: fileInfo.shareId,
+                        file_id: fileInfo.fileId
+                    })
+                }
+            );
+
+            const data = await response.json();
+            if (data.download_url) {
+                return data.download_url;
+            }
+
+            throw new Error('无法获取下载链接');
+        }
+
+        async getShareToken(shareId) {
+            const response = await crossOriginRequest(
+                `${this.apiBase}/v2/share_link/get_share_token`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        share_id: shareId,
+                        share_pwd: ''
+                    })
+                }
+            );
+
+            const data = await response.json();
+            if (data.share_token) {
+                localStorage.setItem('shareToken', data.share_token);
+                return data.share_token;
+            }
+
+            throw new Error('无法获取分享令牌');
         }
     }
 
