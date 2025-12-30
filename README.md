@@ -1,7 +1,7 @@
 # 网盘直链下载增强工具 🚀
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/browsers-18+-orange.svg" alt="Browsers">
   <img src="https://img.shields.io/badge/platforms-6+-brightgreen.svg" alt="Platforms">
@@ -205,9 +205,27 @@ weiruan-Netdisk/
 3. **直链获取** - 通过各平台API获取直接下载链接
 4. **下载触发** - 调用浏览器原生下载功能
 
-## 📝 开发计划
+## 📝 更新日志
 
-### v1.1.0 (当前版本) ✅
+### v1.4.0 (当前版本) ✅
+- [x] 修复夸克网盘直链获取失败的问题 (404错误)
+- [x] 实现基于Token的标准API流程
+- [x] 添加`getShareToken`方法获取stoken
+- [x] 使用`drive-pc.quark.cn`正确的API端点
+- [x] 优化夸克网盘认证流程
+
+### v1.3.3
+- [x] 增强夸克网盘调试功能
+- [x] 添加多种API端点fallback机制
+- [x] 改进错误日志输出
+
+### v1.3.0
+- [x] 全面修复所有网盘直链获取功能
+- [x] 增强百度网盘bdstoken处理
+- [x] 优化天翼云盘参数验证
+- [x] 改进阿里云盘token管理
+
+### v1.1.0
 - [x] 百度网盘支持
 - [x] 天翼云盘支持
 - [x] 蓝奏云支持
@@ -219,7 +237,9 @@ weiruan-Netdisk/
 - [x] 基础UI界面
 - [x] 18+浏览器适配
 
-### v1.2.0 (计划中) 🔄
+## 🎯 开发计划
+
+### v1.5.0 (计划中) 🔄
 - [ ] 迅雷云盘支持
 - [ ] OneDrive支持
 - [ ] 115网盘支持

@@ -64,26 +64,61 @@ export class QuarkDownloader extends BaseDownloader {
   }
 
   /**
+   * 获取分享令牌
+   */
+  async getShareToken(shareId, passcode = '') {
+    try {
+      const response = await this.crossOriginRequest(
+        `${this.apiBase}/1/clouddrive/share/sharepage/token`,
+        {
+          method: 'POST',
+          headers: this.quarkHeaders,
+          body: JSON.stringify({
+            pwd_id: shareId,
+            passcode: passcode
+          })
+        }
+      );
+
+      const data = await response.json();
+      if (data.status === 200 && data.data && data.data.stoken) {
+        return data.data.stoken;
+      }
+    } catch (error) {
+      console.error('Get share token failed:', error);
+    }
+
+    return null;
+  }
+
+  /**
    * 获取分享文件列表
    */
   async getShareFileList(shareId) {
     try {
       const passcode = this.getPasscode();
 
+      // 第一步：获取分享令牌
+      const stoken = await this.getShareToken(shareId, passcode);
+      if (!stoken) {
+        throw new Error('无法获取分享令牌，请检查分享链接或密码');
+      }
+
+      // 第二步：获取文件列表
+      const params = new URLSearchParams({
+        pwd_id: shareId,
+        stoken: stoken,
+        pdir_fid: '0',
+        _page: '1',
+        _size: '100',
+        _sort: 'file_type:asc,updated_at:desc'
+      });
+
       const response = await this.crossOriginRequest(
-        `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
+        `${this.apiBase}/1/clouddrive/share/sharepage/detail?${params.toString()}`,
         {
-          method: 'POST',
-          headers: this.quarkHeaders,
-          body: JSON.stringify({
-            pwd_id: shareId,
-            passcode: passcode || '',
-            pdir_fid: '0',
-            force: 0,
-            _page: 1,
-            _size: 100,
-            _sort: 'file_type:asc,updated_at:desc'
-          })
+          method: 'GET',
+          headers: this.quarkHeaders
         }
       );
 
@@ -95,7 +130,8 @@ export class QuarkDownloader extends BaseDownloader {
           fileSize: file.size,
           fileType: file.file_type,
           shareId: shareId,
-          shareToken: data.data.share_token
+          stoken: stoken,
+          passcode: passcode
         }));
       }
     } catch (error) {
@@ -190,6 +226,15 @@ export class QuarkDownloader extends BaseDownloader {
    */
   async getShareDownloadUrl(fileInfo) {
     try {
+      // 确保有stoken
+      let stoken = fileInfo.stoken;
+      if (!stoken) {
+        stoken = await this.getShareToken(fileInfo.shareId, fileInfo.passcode || '');
+        if (!stoken) {
+          throw new Error('无法获取分享令牌');
+        }
+      }
+
       const response = await this.crossOriginRequest(
         `${this.apiBase}/1/clouddrive/share/sharepage/download`,
         {
@@ -197,8 +242,8 @@ export class QuarkDownloader extends BaseDownloader {
           headers: this.quarkHeaders,
           body: JSON.stringify({
             fids: [fileInfo.fid],
-            share_id: fileInfo.shareId,
-            share_token: fileInfo.shareToken
+            pwd_id: fileInfo.shareId,
+            stoken: stoken
           })
         }
       );
@@ -219,6 +264,7 @@ export class QuarkDownloader extends BaseDownloader {
       }
     } catch (error) {
       console.error('Get share download url failed:', error);
+      throw error;
     }
 
     throw new Error('无法获取下载链接');
@@ -265,23 +311,10 @@ export class QuarkDownloader extends BaseDownloader {
    */
   async verifyPasscode(shareId, passcode) {
     try {
-      const response = await this.crossOriginRequest(
-        `${this.apiBase}/1/clouddrive/share/sharepage/detail`,
-        {
-          method: 'POST',
-          headers: this.quarkHeaders,
-          body: JSON.stringify({
-            pwd_id: shareId,
-            passcode: passcode,
-            pdir_fid: '0',
-            force: 0
-          })
-        }
-      );
+      // 尝试获取token来验证密码
+      const stoken = await this.getShareToken(shareId, passcode);
 
-      const data = await response.json();
-
-      if (data.status === 200) {
+      if (stoken) {
         // 保存密码到localStorage
         localStorage.setItem(`quark_passcode_${shareId}`, passcode);
         return true;

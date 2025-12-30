@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.3.3
+// @version      1.4.0
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -1036,6 +1036,42 @@
             return match ? match[1] : null;
         }
 
+        // 获取分享令牌 (stoken) - 必须先调用此API才能获取下载链接
+        async getShareToken(shareId, passcode = '') {
+            try {
+                const headers = {
+                    ...this.quarkHeaders,
+                    'Cookie': document.cookie
+                };
+
+                console.log('[夸克网盘] 获取分享令牌...', { shareId, passcode: passcode ? '***' : '无' });
+
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/1/clouddrive/share/sharepage/token`,
+                    {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({
+                            pwd_id: shareId,
+                            passcode: passcode
+                        })
+                    }
+                );
+
+                const data = await response.json();
+                console.log('[夸克网盘] Token响应:', data);
+
+                if (data.status === 200 && data.data && data.data.stoken) {
+                    console.log('[夸克网盘] ✅ 成功获取stoken');
+                    return data.data.stoken;
+                }
+            } catch (error) {
+                console.error('[夸克网盘] 获取stoken失败:', error);
+            }
+
+            return null;
+        }
+
         async getDirectLink(fileInfo) {
             console.log('[夸克网盘] 开始获取直链', fileInfo);
 
@@ -1045,6 +1081,15 @@
                 }
                 if (!fileInfo.shareId) {
                     throw new Error('缺少分享ID');
+                }
+
+                // 方法0: 标准Token流程 (2025年最新方法)
+                console.log('[夸克网盘] 尝试方法0: 标准Token流程');
+                try {
+                    const result = await this.getDirectLinkWithToken(fileInfo);
+                    if (result) return result;
+                } catch (e) {
+                    console.warn('[夸克网盘] 方法0失败:', e.message);
                 }
 
                 // 方法1: 尝试新版API端点
@@ -1079,6 +1124,52 @@
                 console.error('[夸克网盘] 获取直链失败:', error);
                 throw new Error(`夸克网盘：${error.message}`);
             }
+        }
+
+        // 标准Token流程 - 基于2025年实际工作的API
+        async getDirectLinkWithToken(fileInfo) {
+            const headers = {
+                ...this.quarkHeaders,
+                'Cookie': document.cookie
+            };
+
+            // 步骤1: 获取stoken
+            const stoken = await this.getShareToken(
+                fileInfo.shareId,
+                fileInfo.passcode || ''
+            );
+
+            if (!stoken) {
+                throw new Error('无法获取分享令牌');
+            }
+
+            // 步骤2: 使用stoken获取下载链接
+            console.log('[夸克网盘] 使用stoken获取下载链接...');
+            const response = await crossOriginRequest(
+                `${this.apiBase}/1/clouddrive/share/sharepage/download`,
+                {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        fids: [fileInfo.fid],
+                        pwd_id: fileInfo.shareId,
+                        stoken: stoken
+                    })
+                }
+            );
+
+            const data = await response.json();
+            console.log('[夸克网盘] Token方法下载响应:', data);
+
+            if (data.status === 200 && data.data && data.data.length > 0) {
+                const fileData = data.data[0];
+                if (fileData.download_url) {
+                    console.log('[夸克网盘] ✅ Token方法成功获取直链');
+                    return fileData.download_url;
+                }
+            }
+
+            return null;
         }
 
         // 新版API (v2) - 先获取文件详情，再获取下载链接
