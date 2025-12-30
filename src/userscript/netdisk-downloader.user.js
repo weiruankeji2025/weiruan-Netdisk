@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.3.2
+// @version      1.3.3
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -1206,7 +1206,7 @@
             );
 
             const data = await response.json();
-            console.log('[夸克网盘] Web API响应:', data);
+            console.log('[夸克网盘] Web API完整响应:', JSON.stringify(data, null, 2));
 
             if (data.data && data.data.length > 0) {
                 const fileData = data.data[0];
@@ -1216,7 +1216,82 @@
                 }
             }
 
+            // 如果没有download_url，尝试其他可能的字段
+            if (data.data && data.data.length > 0) {
+                const fileData = data.data[0];
+                console.log('[夸克网盘] 文件数据结构:', JSON.stringify(fileData, null, 2));
+
+                // 尝试各种可能的下载链接字段
+                const possibleUrls = [
+                    fileData.download_url,
+                    fileData.downloadUrl,
+                    fileData.url,
+                    fileData.link,
+                    fileData.file_url
+                ];
+
+                for (const url of possibleUrls) {
+                    if (url) {
+                        console.log('[夸克网盘] ✅ 找到可能的下载链接:', url);
+                        return url;
+                    }
+                }
+            }
+
+            // 检查是否有错误信息
+            if (data.code || data.message) {
+                console.error('[夸克网盘] API错误:', {
+                    code: data.code,
+                    message: data.message,
+                    status: data.status
+                });
+            }
+
             return null;
+        }
+
+        // 方法4: 从页面的实际网络请求中拦截下载链接
+        async getDirectLinkFromPage(fileInfo) {
+            console.log('[夸克网盘] 尝试方法4: 从页面拦截');
+
+            return new Promise((resolve, reject) => {
+                const originalFetch = unsafeWindow.fetch;
+                const originalXHR = unsafeWindow.XMLHttpRequest;
+
+                // 监听 5 秒钟
+                const timeout = setTimeout(() => {
+                    console.warn('[夸克网盘] 拦截超时');
+                    resolve(null);
+                }, 5000);
+
+                // 拦截 fetch 请求
+                unsafeWindow.fetch = async function(...args) {
+                    const response = await originalFetch.apply(this, args);
+                    const url = args[0];
+
+                    if (url && url.includes('download')) {
+                        try {
+                            const clone = response.clone();
+                            const data = await clone.json();
+
+                            if (data.data && data.data.length > 0) {
+                                const downloadUrl = data.data[0].download_url;
+                                if (downloadUrl) {
+                                    console.log('[夸克网盘] ✅ 从页面请求拦截到下载链接');
+                                    clearTimeout(timeout);
+                                    unsafeWindow.fetch = originalFetch;
+                                    resolve(downloadUrl);
+                                }
+                            }
+                        } catch (e) {}
+                    }
+
+                    return response;
+                };
+
+                // 提示用户点击下载按钮
+                console.log('[夸克网盘] 请点击页面上的"下载"按钮，我会拦截真实的API...');
+            });
         }
     }
 
