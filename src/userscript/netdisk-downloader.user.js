@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.3.1
+// @version      1.3.2
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -874,117 +874,159 @@
         async parseFileInfo() {
             try {
                 const shareId = this.getShareId();
-                console.log('夸克网盘 Share ID:', shareId);
+                console.log('[夸克网盘] Share ID:', shareId);
+
+                // 尝试获取更多认证信息
+                const pwdId = this.getPwdId();
+                const passcode = this.getPasscode();
+
+                console.log('[夸克网盘] 认证信息:', { shareId, pwdId, passcode: passcode ? '***' : '无' });
 
                 // 方法1: 从 DOM 提取文件信息（最可靠，优先使用）
-                const domFiles = this.parseFilesFromDOM(shareId);
+                const domFiles = this.parseFilesFromDOM(shareId, pwdId, passcode);
                 if (domFiles.length > 0) {
-                    console.log(`✅ 从 DOM 获取到 ${domFiles.length} 个文件`);
+                    console.log(`[夸克网盘] ✅ 从 DOM 获取到 ${domFiles.length} 个文件`);
                     return domFiles;
                 }
 
                 // 方法2: 从 __INITIAL_STATE__ 获取
                 if (unsafeWindow.__INITIAL_STATE__) {
-                    console.log('找到 __INITIAL_STATE__:', unsafeWindow.__INITIAL_STATE__);
+                    console.log('[夸克网盘] 找到 __INITIAL_STATE__');
                     const state = unsafeWindow.__INITIAL_STATE__;
                     const files = state?.list?.list || state?.share?.list || [];
 
                     if (files.length > 0) {
-                        console.log(`✅ 从 __INITIAL_STATE__ 获取到 ${files.length} 个文件`);
+                        console.log(`[夸克网盘] ✅ 从 __INITIAL_STATE__ 获取到 ${files.length} 个文件`);
                         return files.map(file => ({
                             fid: file.fid,
                             fileName: file.file_name || file.fileName,
                             fileSize: file.size || file.fileSize,
-                            shareId: shareId
+                            shareId: shareId,
+                            pwdId: pwdId,
+                            passcode: passcode
                         }));
                     }
                 }
 
                 // 方法3: 从 window.g_initialProps 获取
                 if (unsafeWindow.g_initialProps) {
-                    console.log('找到 g_initialProps:', unsafeWindow.g_initialProps);
+                    console.log('[夸克网盘] 找到 g_initialProps');
                     const props = unsafeWindow.g_initialProps;
                     const files = props?.resData?.list || props?.data?.list || [];
 
                     if (files.length > 0) {
-                        console.log(`✅ 从 g_initialProps 获取到 ${files.length} 个文件`);
+                        console.log(`[夸克网盘] ✅ 从 g_initialProps 获取到 ${files.length} 个文件`);
                         return files.map(file => ({
                             fid: file.fid,
                             fileName: file.file_name || file.fileName,
                             fileSize: file.size || file.fileSize,
-                            shareId: shareId
+                            shareId: shareId,
+                            pwdId: pwdId,
+                            passcode: passcode
                         }));
                     }
                 }
 
-                console.warn('所有方法都未能获取到文件列表');
+                console.warn('[夸克网盘] 所有方法都未能获取到文件列表');
             } catch (error) {
-                console.error('Parse file info failed:', error);
+                console.error('[夸克网盘] Parse file info failed:', error);
             }
             return [];
         }
 
-        parseFilesFromDOM(shareId) {
+        getPwdId() {
+            // 从URL获取pwd_id
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('pwd_id') || this.getShareId();
+        }
+
+        getPasscode() {
+            // 尝试从页面获取提取码
+            const passcodeInput = document.querySelector('input[placeholder*="提取码"]');
+            if (passcodeInput && passcodeInput.value) {
+                return passcodeInput.value;
+            }
+
+            // 从sessionStorage获取
+            try {
+                const saved = sessionStorage.getItem(`quark_passcode_${this.getShareId()}`);
+                if (saved) return saved;
+            } catch (e) {}
+
+            return '';
+        }
+
+        parseFilesFromDOM(shareId, pwdId, passcode) {
             try {
                 const files = [];
                 const fileTable = document.querySelector('.ant-table-tbody');
 
                 if (!fileTable) {
-                    console.log('未找到文件列表表格');
+                    console.log('[夸克网盘] 未找到文件列表表格');
                     return [];
                 }
 
                 const rows = fileTable.querySelectorAll('tr');
-                console.log(`找到 ${rows.length} 个文件行`);
+                console.log(`[夸克网盘] 找到 ${rows.length} 个文件行`);
 
                 rows.forEach((row, index) => {
-                    const nameEl = row.querySelector('.filename-text');
+                    const nameEl = row.querySelector('.filename-text') ||
+                                   row.querySelector('[class*="filename"]') ||
+                                   row.querySelector('span[title]');
                     const cells = row.querySelectorAll('td');
 
-                    if (nameEl && cells.length >= 3) {
-                        const fileName = nameEl.textContent.trim();
-                        const fileSize = cells[2]?.textContent.trim() || '';
+                    if (nameEl && cells.length >= 2) {
+                        const fileName = nameEl.textContent.trim() || nameEl.getAttribute('title');
+                        const fileSize = cells[2]?.textContent.trim() || cells[1]?.textContent.trim() || '';
 
                         // 跳过文件夹（显示"X项"的是文件夹）
-                        if (fileSize.includes('项')) {
-                            console.log(`跳过文件夹: ${fileName}`);
+                        if (fileSize.includes('项') || fileSize.includes('个文件')) {
+                            console.log(`[夸克网盘] 跳过文件夹: ${fileName}`);
                             return;
                         }
 
                         // 尝试从row的data属性获取fid
                         let fid = row.getAttribute('data-row-key') ||
                                  row.getAttribute('data-fid') ||
-                                 `dom_file_${index}`;
+                                 row.getAttribute('data-id');
 
                         // 尝试从React Fiber获取真实的fid
                         const fiberKey = Object.keys(row).find(key => key.startsWith('__react'));
                         if (fiberKey) {
                             try {
                                 const fiber = row[fiberKey];
-                                const rowData = fiber?.return?.memoizedProps?.record;
+                                const rowData = fiber?.return?.memoizedProps?.record ||
+                                               fiber?.memoizedProps?.record;
                                 if (rowData && rowData.fid) {
                                     fid = rowData.fid;
-                                    console.log(`从React Fiber获取到fid: ${fid}`);
+                                    console.log(`[夸克网盘] 从React Fiber获取到fid: ${fid}`);
                                 }
                             } catch (e) {
                                 // 忽略错误
                             }
                         }
 
+                        if (!fid) {
+                            console.warn(`[夸克网盘] 无法获取文件 ${fileName} 的fid，跳过`);
+                            return;
+                        }
+
                         files.push({
                             fid: fid,
                             fileName: fileName,
                             fileSize: fileSize,
-                            shareId: shareId
+                            shareId: shareId,
+                            pwdId: pwdId,
+                            passcode: passcode
                         });
 
-                        console.log(`提取文件: ${fileName} (${fileSize})`);
+                        console.log(`[夸克网盘] 提取文件: ${fileName} (${fileSize}), fid: ${fid}`);
                     }
                 });
 
                 return files;
             } catch (error) {
-                console.error('从DOM提取文件失败:', error);
+                console.error('[夸克网盘] 从DOM提取文件失败:', error);
                 return [];
             }
         }
@@ -1039,41 +1081,69 @@
             }
         }
 
-        // 新版API (v2)
+        // 新版API (v2) - 先获取文件详情，再获取下载链接
         async getDirectLinkV2(fileInfo) {
             const headers = {
                 ...this.quarkHeaders,
                 'Cookie': document.cookie
             };
 
-            const response = await crossOriginRequest(
-                `https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail`,
-                {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        pwd_id: fileInfo.shareId,
-                        passcode: '',
-                        pdir_fid: '0',
-                        _page: 1,
-                        _size: 50,
-                        _fetch_banner: 0,
-                        _fetch_share: 1,
-                        _fetch_total: 1,
-                        _sort: 'file_type:asc,updated_at:desc'
-                    })
-                }
-            );
+            console.log('[夸克网盘] V2方法 - 请求参数:', {
+                pwd_id: fileInfo.pwdId || fileInfo.shareId,
+                fid: fileInfo.fid
+            });
 
-            const data = await response.json();
-            console.log('[夸克网盘] V2 API响应:', data);
+            // 步骤1: 获取文件详情（可能需要先调用这个API）
+            try {
+                const detailResponse = await crossOriginRequest(
+                    `https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail`,
+                    {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({
+                            pwd_id: fileInfo.pwdId || fileInfo.shareId,
+                            passcode: fileInfo.passcode || '',
+                            pdir_fid: '0',
+                            _page: 1,
+                            _size: 100,
+                            _fetch_banner: 0,
+                            _fetch_share: 1,
+                            _fetch_total: 1,
+                            _sort: 'file_type:asc,updated_at:desc'
+                        })
+                    }
+                );
 
-            if (data.data && data.data.list) {
-                const file = data.data.list.find(f => f.fid === fileInfo.fid);
-                if (file && file.download_url) {
-                    console.log('[夸克网盘] ✅ V2成功获取直链');
-                    return file.download_url;
+                const detailData = await detailResponse.json();
+                console.log('[夸克网盘] V2详情响应:', detailData);
+
+                // 步骤2: 使用详情中的信息获取下载链接
+                if (detailData.data && detailData.data.share) {
+                    const downloadResponse = await crossOriginRequest(
+                        `https://drive-h.quark.cn/1/clouddrive/share/sharepage/download`,
+                        {
+                            method: 'POST',
+                            headers: headers,
+                            body: JSON.stringify({
+                                fids: [fileInfo.fid],
+                                share_id: detailData.data.share.share_id || fileInfo.shareId
+                            })
+                        }
+                    );
+
+                    const downloadData = await downloadResponse.json();
+                    console.log('[夸克网盘] V2下载响应:', downloadData);
+
+                    if (downloadData.data && downloadData.data.length > 0) {
+                        const fileData = downloadData.data[0];
+                        if (fileData.download_url) {
+                            console.log('[夸克网盘] ✅ V2成功获取直链');
+                            return fileData.download_url;
+                        }
+                    }
                 }
+            } catch (e) {
+                console.error('[夸克网盘] V2方法详细错误:', e);
             }
 
             return null;
