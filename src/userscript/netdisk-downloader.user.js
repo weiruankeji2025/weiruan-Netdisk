@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.2.1
+// @version      1.3.0
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -191,16 +191,42 @@
                 headers: options.headers || {},
                 data: options.body,
                 timeout: 30000,
+                responseType: options.responseType || 'text',
                 onload: (response) => {
+                    console.log(`[请求] ${options.method || 'GET'} ${url} - 状态: ${response.status}`);
+
+                    if (response.status >= 400) {
+                        console.error(`[请求失败] ${url}`, {
+                            status: response.status,
+                            statusText: response.statusText,
+                            response: response.responseText?.substring(0, 500)
+                        });
+                    }
+
                     resolve({
                         ok: response.status >= 200 && response.status < 300,
                         status: response.status,
+                        statusText: response.statusText,
+                        headers: response.responseHeaders,
                         text: () => Promise.resolve(response.responseText),
-                        json: () => Promise.resolve(JSON.parse(response.responseText))
+                        json: () => {
+                            try {
+                                return Promise.resolve(JSON.parse(response.responseText));
+                            } catch (e) {
+                                console.error('[JSON解析失败]', response.responseText?.substring(0, 200));
+                                return Promise.reject(new Error('Invalid JSON response'));
+                            }
+                        }
                     });
                 },
-                onerror: (error) => reject(error),
-                ontimeout: () => reject(new Error('Request timeout'))
+                onerror: (error) => {
+                    console.error(`[请求错误] ${url}`, error);
+                    reject(new Error(`请求失败: ${error.message || '网络错误'}`));
+                },
+                ontimeout: () => {
+                    console.error(`[请求超时] ${url}`);
+                    reject(new Error('请求超时，请检查网络连接'));
+                }
             });
         });
     }
@@ -301,39 +327,94 @@
         }
 
         async getDirectLink(fileInfo) {
+            console.log('[百度网盘] 开始获取直链', fileInfo);
+
+            // 方法1: 使用官方下载API
             try {
                 const bdstoken = this.getBdstoken();
                 if (!bdstoken) {
-                    console.warn('No bdstoken found, trying alternative method');
-                    return null;
-                }
-                const params = new URLSearchParams({
-                    type: 'dlink',
-                    fidlist: `[${fileInfo.fs_id}]`,
-                    bdstoken: bdstoken
-                });
+                    console.warn('[百度网盘] 未找到 bdstoken');
+                } else {
+                    console.log('[百度网盘] 找到 bdstoken:', bdstoken.substring(0, 10) + '...');
 
-                const response = await crossOriginRequest(
-                    `https://pan.baidu.com/api/download?${params}`,
-                    {
-                        method: 'GET',
-                        headers: {
-                            'User-Agent': navigator.userAgent,
-                            'Cookie': document.cookie,
-                            'Referer': window.location.href
+                    const params = new URLSearchParams({
+                        type: 'dlink',
+                        fidlist: `[${fileInfo.fs_id}]`,
+                        bdstoken: bdstoken
+                    });
+
+                    const response = await crossOriginRequest(
+                        `https://pan.baidu.com/api/download?${params}`,
+                        {
+                            method: 'GET',
+                            headers: {
+                                'User-Agent': navigator.userAgent,
+                                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                                'Accept-Language': 'zh-CN,zh;q=0.9',
+                                'Cookie': document.cookie,
+                                'Referer': window.location.href,
+                                'X-Requested-With': 'XMLHttpRequest'
+                            }
                         }
-                    }
-                );
+                    );
 
-                const data = await response.json();
-                if (data.errno === 0 && data.dlink) {
-                    return data.dlink;
+                    const data = await response.json();
+                    console.log('[百度网盘] API响应:', data);
+
+                    if (data.errno === 0 && data.dlink) {
+                        console.log('[百度网盘] ✅ 成功获取直链');
+                        return data.dlink;
+                    } else {
+                        console.warn('[百度网盘] API返回错误:', data.errno, data.errmsg || data.error_msg);
+                    }
                 }
             } catch (e) {
-                console.warn('Official API failed:', e);
+                console.error('[百度网盘] 官方API失败:', e);
             }
 
-            throw new Error('无法获取下载链接');
+            // 方法2: 尝试使用分享链接API（如果是分享页面）
+            if (window.location.href.includes('/s/')) {
+                try {
+                    return await this.getShareDownloadLink(fileInfo);
+                } catch (e) {
+                    console.error('[百度网盘] 分享链接API失败:', e);
+                }
+            }
+
+            throw new Error('百度网盘：所有获取直链方法均失败，请检查登录状态或文件权限');
+        }
+
+        async getShareDownloadLink(fileInfo) {
+            const shareId = window.location.pathname.match(/\/s\/(.+)/)?.[1];
+            if (!shareId) {
+                throw new Error('无法获取分享ID');
+            }
+
+            const response = await crossOriginRequest(
+                'https://pan.baidu.com/share/download',
+                {
+                    method: 'POST',
+                    headers: {
+                        'User-Agent': navigator.userAgent,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cookie': document.cookie,
+                        'Referer': window.location.href
+                    },
+                    body: new URLSearchParams({
+                        sign: window.yunData?.sign || '',
+                        timestamp: window.yunData?.timestamp || Date.now(),
+                        fid_list: `[${fileInfo.fs_id}]`,
+                        share_id: shareId
+                    }).toString()
+                }
+            );
+
+            const data = await response.json();
+            if (data.errno === 0 && data.dlink) {
+                return data.dlink;
+            }
+
+            throw new Error('分享链接获取失败');
         }
     }
 
@@ -382,24 +463,44 @@
         }
 
         async getDirectLink(fileInfo) {
-            const response = await crossOriginRequest(
-                `${this.apiBase}/api/open/share/getShareDownloadUrl.action`,
-                {
-                    method: 'POST',
-                    headers: {
-                        ...this.tianyiHeaders,
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: `shareCode=${fileInfo.shareCode}&fileId=${fileInfo.fileId}`
+            console.log('[天翼云盘] 开始获取直链', fileInfo);
+
+            try {
+                // 确保有必要的参数
+                if (!fileInfo.shareCode) {
+                    throw new Error('缺少分享码');
                 }
-            );
+                if (!fileInfo.fileId) {
+                    throw new Error('缺少文件ID');
+                }
 
-            const data = await response.json();
-            if (data.res_code === 0 && data.fileDownloadUrl) {
-                return data.fileDownloadUrl;
+                const response = await crossOriginRequest(
+                    `${this.apiBase}/api/open/share/getShareDownloadUrl.action`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            ...this.tianyiHeaders,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cookie': document.cookie
+                        },
+                        body: `shareCode=${fileInfo.shareCode}&fileId=${fileInfo.fileId}`
+                    }
+                );
+
+                const data = await response.json();
+                console.log('[天翼云盘] API响应:', data);
+
+                if (data.res_code === 0 && data.fileDownloadUrl) {
+                    console.log('[天翼云盘] ✅ 成功获取直链');
+                    return data.fileDownloadUrl;
+                } else {
+                    console.warn('[天翼云盘] API返回错误:', data.res_code, data.res_message);
+                    throw new Error(`天翼云盘API错误: ${data.res_message || '未知错误'}`);
+                }
+            } catch (e) {
+                console.error('[天翼云盘] 获取直链失败:', e);
+                throw new Error(`天翼云盘：${e.message}`);
             }
-
-            throw new Error('无法获取下载链接');
         }
     }
 
@@ -537,47 +638,78 @@
         }
 
         async getDirectLink(fileInfo) {
-            if (fileInfo.isShare) {
-                // 分享文件下载
-                return this.getShareDownloadUrl(fileInfo);
-            } else {
-                // 个人文件下载
-                return this.getPersonalDownloadUrl(fileInfo);
+            console.log('[阿里云盘] 开始获取直链', fileInfo);
+
+            try {
+                if (fileInfo.isShare || fileInfo.shareId) {
+                    // 分享文件下载
+                    return await this.getShareDownloadUrl(fileInfo);
+                } else {
+                    // 个人文件下载
+                    return await this.getPersonalDownloadUrl(fileInfo);
+                }
+            } catch (e) {
+                console.error('[阿里云盘] 获取直链失败:', e);
+                throw e;
             }
         }
 
         async getPersonalDownloadUrl(fileInfo) {
+            console.log('[阿里云盘] 使用个人文件API');
+
             const token = getCookie('token') || localStorage.getItem('token');
+            if (!token) {
+                throw new Error('未找到登录Token，请先登录阿里云盘');
+            }
+
+            console.log('[阿里云盘] Token已找到');
+
             const response = await crossOriginRequest(
                 `${this.apiBase}/v2/file/get_download_url`,
                 {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${token}`,
+                        'Referer': 'https://www.aliyundrive.com/',
+                        'Origin': 'https://www.aliyundrive.com',
+                        'User-Agent': navigator.userAgent
                     },
                     body: JSON.stringify({
                         drive_id: fileInfo.driveId,
-                        file_id: fileInfo.fileId
+                        file_id: fileInfo.fileId,
+                        expire_sec: 14400
                     })
                 }
             );
 
             const data = await response.json();
+            console.log('[阿里云盘] 个人文件API响应:', data);
+
             if (data.url) {
+                console.log('[阿里云盘] ✅ 成功获取直链');
                 return data.url;
+            }
+
+            if (data.code) {
+                throw new Error(`阿里云盘API错误: ${data.message || data.code}`);
             }
 
             throw new Error('无法获取下载链接');
         }
 
         async getShareDownloadUrl(fileInfo) {
+            console.log('[阿里云盘] 使用分享文件API');
+
             // 分享文件需要先获取 share_token
-            let shareToken = fileInfo.shareToken;
+            let shareToken = fileInfo.shareToken || localStorage.getItem('shareToken');
 
             if (!shareToken) {
+                console.log('[阿里云盘] 正在获取 shareToken...');
                 shareToken = await this.getShareToken(fileInfo.shareId);
             }
+
+            console.log('[阿里云盘] ShareToken已找到');
 
             const response = await crossOriginRequest(
                 `${this.apiBase}/v2/file/get_share_link_download_url`,
@@ -585,30 +717,46 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Share-Token': shareToken
+                        'X-Share-Token': shareToken,
+                        'Referer': 'https://www.aliyundrive.com/',
+                        'Origin': 'https://www.aliyundrive.com',
+                        'User-Agent': navigator.userAgent
                     },
                     body: JSON.stringify({
                         share_id: fileInfo.shareId,
-                        file_id: fileInfo.fileId
+                        file_id: fileInfo.fileId,
+                        expire_sec: 14400
                     })
                 }
             );
 
             const data = await response.json();
+            console.log('[阿里云盘] 分享文件API响应:', data);
+
             if (data.download_url) {
+                console.log('[阿里云盘] ✅ 成功获取直链');
                 return data.download_url;
+            }
+
+            if (data.code) {
+                throw new Error(`阿里云盘API错误: ${data.message || data.code}`);
             }
 
             throw new Error('无法获取下载链接');
         }
 
         async getShareToken(shareId) {
+            console.log('[阿里云盘] 获取 shareToken, shareId:', shareId);
+
             const response = await crossOriginRequest(
                 `${this.apiBase}/v2/share_link/get_share_token`,
                 {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Referer': 'https://www.aliyundrive.com/',
+                        'Origin': 'https://www.aliyundrive.com',
+                        'User-Agent': navigator.userAgent
                     },
                     body: JSON.stringify({
                         share_id: shareId,
@@ -618,9 +766,21 @@
             );
 
             const data = await response.json();
+            console.log('[阿里云盘] ShareToken API响应:', data);
+
             if (data.share_token) {
                 localStorage.setItem('shareToken', data.share_token);
+                console.log('[阿里云盘] ✅ ShareToken已保存');
                 return data.share_token;
+            }
+
+            if (data.code) {
+                if (data.code === 'ShareLinkTokenInvalid') {
+                    throw new Error('分享链接无效或已过期');
+                } else if (data.code === 'InvalidParameter.SharePwd') {
+                    throw new Error('需要提取码，请在页面上输入提取码后重试');
+                }
+                throw new Error(`获取ShareToken失败: ${data.message || data.code}`);
             }
 
             throw new Error('无法获取分享令牌');
@@ -645,25 +805,52 @@
         }
 
         async getDirectLink(fileInfo) {
-            const response = await crossOriginRequest(
-                'https://www.weiyun.com/webapp/share/download',
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        share_key: fileInfo.shareKey,
-                        pdir_fid: fileInfo.pDirKey || '0',
-                        fid: fileInfo.fileId
-                    }).toString()
+            console.log('[微云] 开始获取直链', fileInfo);
+
+            try {
+                if (!fileInfo.shareKey) {
+                    throw new Error('缺少分享Key');
                 }
-            );
+                if (!fileInfo.fileId) {
+                    throw new Error('缺少文件ID');
+                }
 
-            const data = await response.json();
-            if (data.data && data.data.download_url) {
-                return data.data.download_url;
+                const response = await crossOriginRequest(
+                    'https://www.weiyun.com/webapp/share/download',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Referer': window.location.href,
+                            'Origin': 'https://www.weiyun.com',
+                            'User-Agent': navigator.userAgent,
+                            'Cookie': document.cookie
+                        },
+                        body: new URLSearchParams({
+                            share_key: fileInfo.shareKey,
+                            pdir_fid: fileInfo.pDirKey || '0',
+                            fid: fileInfo.fileId
+                        }).toString()
+                    }
+                );
+
+                const data = await response.json();
+                console.log('[微云] API响应:', data);
+
+                if (data.data && data.data.download_url) {
+                    console.log('[微云] ✅ 成功获取直链');
+                    return data.data.download_url;
+                }
+
+                if (data.code !== 0) {
+                    throw new Error(`微云API错误: ${data.msg || data.message || '未知错误'}`);
+                }
+
+                throw new Error('响应中未找到下载链接');
+            } catch (e) {
+                console.error('[微云] 获取直链失败:', e);
+                throw new Error(`微云：${e.message}`);
             }
-
-            throw new Error('无法获取下载链接');
         }
     }
 
@@ -808,12 +995,29 @@
         }
 
         async getDirectLink(fileInfo) {
+            console.log('[夸克网盘] 开始获取直链', fileInfo);
+
             try {
+                if (!fileInfo.fid) {
+                    throw new Error('缺少文件ID (fid)');
+                }
+                if (!fileInfo.shareId) {
+                    throw new Error('缺少分享ID');
+                }
+
+                // 增强请求头，添加必要的认证信息
+                const headers = {
+                    ...this.quarkHeaders,
+                    'Cookie': document.cookie
+                };
+
+                console.log('[夸克网盘] 请求下载链接...');
+
                 const response = await crossOriginRequest(
                     `${this.apiBase}/1/clouddrive/share/sharepage/download`,
                     {
                         method: 'POST',
-                        headers: this.quarkHeaders,
+                        headers: headers,
                         body: JSON.stringify({
                             fids: [fileInfo.fid],
                             share_id: fileInfo.shareId
@@ -822,17 +1026,30 @@
                 );
 
                 const data = await response.json();
+                console.log('[夸克网盘] API响应:', data);
+
                 if (data.status === 200 && data.data && data.data.length > 0) {
                     const fileData = data.data[0];
                     if (fileData.download_url) {
+                        console.log('[夸克网盘] ✅ 成功获取直链');
                         return fileData.download_url;
                     }
                 }
-            } catch (error) {
-                console.error('Get direct link failed:', error);
-            }
 
-            throw new Error('无法获取下载链接');
+                // 处理错误情况
+                if (data.code) {
+                    throw new Error(`夸克网盘API错误: ${data.message || data.code}`);
+                }
+
+                if (data.status !== 200) {
+                    throw new Error(`请求失败，状态码: ${data.status}`);
+                }
+
+                throw new Error('响应中未找到下载链接');
+            } catch (error) {
+                console.error('[夸克网盘] 获取直链失败:', error);
+                throw new Error(`夸克网盘：${error.message}`);
+            }
         }
     }
 
