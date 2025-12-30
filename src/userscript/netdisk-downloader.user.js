@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载增强工具
 // @namespace    https://github.com/weiruankeji/weiruan-Netdisk
-// @version      1.3.0
+// @version      1.3.1
 // @description  支持百度网盘、天翼云盘、蓝奏云、阿里云盘、微云、夸克网盘等主流网盘的直链下载,适配18+浏览器
 // @author       WeiRuan
 // @match        *://pan.baidu.com/*
@@ -1005,51 +1005,148 @@
                     throw new Error('缺少分享ID');
                 }
 
-                // 增强请求头，添加必要的认证信息
-                const headers = {
-                    ...this.quarkHeaders,
-                    'Cookie': document.cookie
-                };
-
-                console.log('[夸克网盘] 请求下载链接...');
-
-                const response = await crossOriginRequest(
-                    `${this.apiBase}/1/clouddrive/share/sharepage/download`,
-                    {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify({
-                            fids: [fileInfo.fid],
-                            share_id: fileInfo.shareId
-                        })
-                    }
-                );
-
-                const data = await response.json();
-                console.log('[夸克网盘] API响应:', data);
-
-                if (data.status === 200 && data.data && data.data.length > 0) {
-                    const fileData = data.data[0];
-                    if (fileData.download_url) {
-                        console.log('[夸克网盘] ✅ 成功获取直链');
-                        return fileData.download_url;
-                    }
+                // 方法1: 尝试新版API端点
+                console.log('[夸克网盘] 尝试方法1: 新版API');
+                try {
+                    const result = await this.getDirectLinkV2(fileInfo);
+                    if (result) return result;
+                } catch (e) {
+                    console.warn('[夸克网盘] 方法1失败:', e.message);
                 }
 
-                // 处理错误情况
-                if (data.code) {
-                    throw new Error(`夸克网盘API错误: ${data.message || data.code}`);
+                // 方法2: 尝试旧版API端点
+                console.log('[夸克网盘] 尝试方法2: 旧版API');
+                try {
+                    const result = await this.getDirectLinkV1(fileInfo);
+                    if (result) return result;
+                } catch (e) {
+                    console.warn('[夸克网盘] 方法2失败:', e.message);
                 }
 
-                if (data.status !== 200) {
-                    throw new Error(`请求失败，状态码: ${data.status}`);
+                // 方法3: 尝试使用网页端API
+                console.log('[夸克网盘] 尝试方法3: 网页端API');
+                try {
+                    const result = await this.getDirectLinkWeb(fileInfo);
+                    if (result) return result;
+                } catch (e) {
+                    console.warn('[夸克网盘] 方法3失败:', e.message);
                 }
 
-                throw new Error('响应中未找到下载链接');
+                throw new Error('所有API端点均失败，夸克网盘可能已更新接口');
             } catch (error) {
                 console.error('[夸克网盘] 获取直链失败:', error);
                 throw new Error(`夸克网盘：${error.message}`);
             }
+        }
+
+        // 新版API (v2)
+        async getDirectLinkV2(fileInfo) {
+            const headers = {
+                ...this.quarkHeaders,
+                'Cookie': document.cookie
+            };
+
+            const response = await crossOriginRequest(
+                `https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail`,
+                {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        pwd_id: fileInfo.shareId,
+                        passcode: '',
+                        pdir_fid: '0',
+                        _page: 1,
+                        _size: 50,
+                        _fetch_banner: 0,
+                        _fetch_share: 1,
+                        _fetch_total: 1,
+                        _sort: 'file_type:asc,updated_at:desc'
+                    })
+                }
+            );
+
+            const data = await response.json();
+            console.log('[夸克网盘] V2 API响应:', data);
+
+            if (data.data && data.data.list) {
+                const file = data.data.list.find(f => f.fid === fileInfo.fid);
+                if (file && file.download_url) {
+                    console.log('[夸克网盘] ✅ V2成功获取直链');
+                    return file.download_url;
+                }
+            }
+
+            return null;
+        }
+
+        // 旧版API (v1)
+        async getDirectLinkV1(fileInfo) {
+            const headers = {
+                ...this.quarkHeaders,
+                'Cookie': document.cookie
+            };
+
+            const response = await crossOriginRequest(
+                `${this.apiBase}/1/clouddrive/share/sharepage/download`,
+                {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        fids: [fileInfo.fid],
+                        share_id: fileInfo.shareId
+                    })
+                }
+            );
+
+            const data = await response.json();
+            console.log('[夸克网盘] V1 API响应:', data);
+
+            if (data.status === 200 && data.data && data.data.length > 0) {
+                const fileData = data.data[0];
+                if (fileData.download_url) {
+                    console.log('[夸克网盘] ✅ V1成功获取直链');
+                    return fileData.download_url;
+                }
+            }
+
+            return null;
+        }
+
+        // 网页端API
+        async getDirectLinkWeb(fileInfo) {
+            const headers = {
+                'User-Agent': navigator.userAgent,
+                'Referer': 'https://pan.quark.cn/',
+                'Origin': 'https://pan.quark.cn',
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+                'Cookie': document.cookie
+            };
+
+            const response = await crossOriginRequest(
+                `https://pan.quark.cn/1/clouddrive/share/sharepage/download?pr=ucpro&fr=pc`,
+                {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        fids: [fileInfo.fid],
+                        share_id: fileInfo.shareId
+                    })
+                }
+            );
+
+            const data = await response.json();
+            console.log('[夸克网盘] Web API响应:', data);
+
+            if (data.data && data.data.length > 0) {
+                const fileData = data.data[0];
+                if (fileData.download_url) {
+                    console.log('[夸克网盘] ✅ Web成功获取直链');
+                    return fileData.download_url;
+                }
+            }
+
+            return null;
         }
     }
 
